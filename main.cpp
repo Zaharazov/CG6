@@ -440,7 +440,7 @@ void addCube(std::vector<Cube>& cubes, const Camera& camera)
 {
 	std::lock_guard<std::mutex> lock(sceneMutex); // Защищаем критическую секцию
 	// Создаем куб на расстоянии 3 единицы от камеры вдоль ее взгляда
-	Vector3 position = camera.position + camera.forward * 4.0f; // Расстояние от камеры
+	Vector3 position = camera.position + camera.forward * 5.0f; // Расстояние от камеры
 	Cube newCube(position - Vector3(0.5f, 0.5f, 0.5f), position + Vector3(0.5f, 0.5f, 0.5f), Vector3(1, 0, 0), 0.2, 0.3, 1.0);
 	cubes.push_back(newCube);
 }
@@ -449,7 +449,7 @@ void addSphere(std::vector<Sphere>& spheres, const Camera& camera)
 {
 	std::lock_guard<std::mutex> lock(sceneMutex); // Защищаем критическую секцию
 	// Создаем сферу на расстоянии 3 единицы от камеры вдоль ее взгляда
-	Vector3 position = camera.position + camera.forward * 4.0f; // Расстояние от камеры
+	Vector3 position = camera.position + camera.forward * 5.0f; // Расстояние от камеры
 	Sphere newSphere(position, 0.7f, Vector3(0, 0, 1), 0.2f, 0.3f, 1.0f);
 	spheres.push_back(newSphere);
 }
@@ -458,7 +458,7 @@ void addLight(std::vector<Light>& lights, const Camera& camera)
 {
 	std::lock_guard<std::mutex> lock(sceneMutex); // Защищаем критическую секцию
 	// Создаем новый источник света в точке, куда направлена камера
-	Vector3 position = camera.position + camera.forward * 3.0f; // Расстояние от камеры
+	Vector3 position = camera.position + camera.forward * 5.0f; // Расстояние от камеры
 	Light newLight(position, Vector3(0.8, 0.8, 0.8)); // Белый свет
 	lights.push_back(newLight);
 }
@@ -470,9 +470,9 @@ void renderRow(int startY, int endY, sf::Image& image, const Camera& camera,
 	const std::vector<Triangle>& triangles, int traceDepth)
 {
 #pragma omp parallel for
-	for (int y = startY; y < endY; ++y)
+	for (int y = startY; y < endY; y += 1)
 	{
-		for (int x = 0; x < WIDTH; ++x)
+		for (int x = 0; x < WIDTH; x += 1)
 		{
 			// Получаем направление луча из камеры
 			Vector3 direction = camera.getRayDirection(x, y, WIDTH, HEIGHT);
@@ -530,6 +530,7 @@ void renderImageParallelOptimized(
 // основной рендеринг
 int main()
 {
+	omp_set_num_threads(36);
 	int traceDepth = 1;
 
 	sf::RenderWindow window(sf::VideoMode(WIDTH, HEIGHT), "Optimized Scene Rendering");
@@ -546,11 +547,13 @@ int main()
 
 	// Загрузка OBJ-файла
 	//std::string inputfile = "cube.obj";
+
 	//std::string inputfile = "dodecahedron.obj";
 	tinyobj::attrib_t attrib;
 	std::vector<tinyobj::shape_t> shapes;
-	//std::vector<tinyobj::material_t> materials;
-	//std::string warn, err;
+
+	std::vector<tinyobj::material_t> materials;
+	std::string warn, err;
 
 	//if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, inputfile.c_str())) {
 	//	std::cerr << "Ошибка загрузки OBJ: " << warn << err << std::endl;
@@ -594,7 +597,7 @@ int main()
 	fpsBar.setPosition(10.f, 10.f);
 
 	sf::Clock clock;
-	int turn = 0, RTturn = 0;
+	int RTturn = 0;
 
 	while (window.isOpen()) {
 		sf::Event event;
@@ -602,12 +605,16 @@ int main()
 			if (event.type == sf::Event::Closed) {
 				window.close();
 			}
-			if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::C) {
-				if (turn % 2 == 0)
-					addCube(cubes, camera); // Добавляем куб
-				else
-					addSphere(spheres, camera); // Добавляем сферу
-				turn++;
+			if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::Num1) {
+				addCube(cubes, camera); // Добавляем куб
+
+				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT);
+
+				texture.loadFromImage(image);
+			}
+
+			if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::Num2) {
+				addSphere(spheres, camera); // Добавляем сферу
 
 				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT);
 
