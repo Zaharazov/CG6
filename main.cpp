@@ -6,6 +6,9 @@
 #include <thread>
 #include <mutex>  // Для std::mutex и std::lock_guard
 #include <omp.h>
+#include <fstream>
+#include <sstream>
+#include "tiny_obj_loader.h" 
 
 #define M_PI 3.14159265358979323846
 
@@ -13,7 +16,7 @@ const int WIDTH = 600;
 const int HEIGHT = 500;
 
 // вектор для 3D операций
-struct Vector3 
+struct Vector3
 {
 	float x, y, z; // координаты
 
@@ -28,13 +31,13 @@ struct Vector3
 	// скалярное произведенеие
 	float dot(const Vector3& v) const { return x * v.x + y * v.y + z * v.z; }
 	// нормализует вектор
-	Vector3 normalize() const 
+	Vector3 normalize() const
 	{
 		float len = std::sqrt(x * x + y * y + z * z);
 		return *this / len;
 	}
 	// векторное произведение
-	Vector3 cross(const Vector3& v) const 
+	Vector3 cross(const Vector3& v) const
 	{
 		return Vector3(
 			y * v.z - z * v.y,
@@ -44,9 +47,88 @@ struct Vector3
 	}
 };
 
+struct Triangle {
+	Vector3 v0, v1, v2;      // Вершины треугольника
+	Vector3 normal;          // Нормаль к треугольнику
+	Vector3 color;           // Цвет треугольника
+	float reflectivity;      // Коэффициент отражения
+	float transmissivity;    // Коэффициент прозрачности
+	float refractiveIndex;   // Коэффициент преломления
+
+	// Конструктор с параметрами
+	Triangle(const Vector3& v0, const Vector3& v1, const Vector3& v2,
+		const Vector3& col, float refl, float trans = 0.0f, float refrIdx = 1.0f)
+		: v0(v0), v1(v1), v2(v2), color(col), reflectivity(refl),
+		transmissivity(trans), refractiveIndex(refrIdx)
+	{
+		// Вычисляем нормаль
+		Vector3 edge1 = v1 - v0;
+		Vector3 edge2 = v2 - v0;
+		normal = edge1.cross(edge2).normalize();
+	}
+
+	// Метод пересечения луча с треугольником
+	bool intersect(const Vector3& origin, const Vector3& dir, float& t) const {
+		const float epsilon = 1e-6; // Погрешность для вычислений
+
+		Vector3 edge1 = v1 - v0;
+		Vector3 edge2 = v2 - v0;
+		Vector3 h = dir.cross(edge2);
+		float a = edge1.dot(h);
+
+		// Проверяем, параллелен ли луч треугольнику
+		if (std::abs(a) < epsilon) return false;
+
+		float f = 1.0f / a;
+		Vector3 s = origin - v0;
+		float u = f * s.dot(h);
+
+		// Проверяем, находится ли точка пересечения внутри треугольника
+		if (u < 0.0 || u > 1.0) return false;
+
+		Vector3 q = s.cross(edge1);
+		float v = f * dir.dot(q);
+		if (v < 0.0 || u + v > 1.0) return false;
+
+		// Вычисляем параметр t для точки пересечения
+		t = f * edge2.dot(q);
+		return t > epsilon; // Убедимся, что пересечение происходит впереди луча
+	}
+};
+
+bool loadOBJ(const std::string& filepath, std::vector<Triangle>& triangles, const Vector3& color) {
+	std::ifstream file(filepath);
+	if (!file.is_open()) {
+		std::cerr << "Error: Cannot open file " << filepath << std::endl;
+		return false;
+	}
+
+	std::vector<Vector3> vertices;
+	std::string line;
+	while (std::getline(file, line)) {
+		std::istringstream iss(line);
+		std::string prefix;
+		iss >> prefix;
+		if (prefix == "v") {
+			float x, y, z;
+			iss >> x >> y >> z;
+			vertices.emplace_back(x, y, z);
+		}
+		else if (prefix == "f") {
+			int v0, v1, v2;
+			char slash; // для игнорирования символов '/'
+			iss >> v0 >> slash >> v1 >> slash >> v2;
+			triangles.emplace_back(vertices[v0 - 1], vertices[v1 - 1], vertices[v2 - 1], color, 0.2f);
+
+		}
+	}
+
+	file.close();
+	return true;
+}
 
 // сфера
-struct Sphere 
+struct Sphere
 {
 	Vector3 center;
 	float radius;
@@ -85,11 +167,11 @@ struct Sphere
 };
 
 // плоскость
-struct Plane 
+struct Plane
 {
 	Vector3 point; // исходная точка
 	Vector3 normal; // ориентация
-	Vector3 color; 
+	Vector3 color;
 	float reflectivity; // отражжение
 	// конструктор
 	Plane(const Vector3& p, const Vector3& n, const Vector3& col, float refl)
@@ -115,7 +197,7 @@ struct Plane
 };
 
 // куб
-struct Cube 
+struct Cube
 {
 	Vector3 min; // две противоположные вершины куба
 	Vector3 max;
@@ -164,7 +246,7 @@ struct Cube
 };
 
 // Источник света
-struct Light 
+struct Light
 {
 	Vector3 position;
 	Vector3 intensity;
@@ -173,7 +255,7 @@ struct Light
 };
 
 // камера
-struct Camera 
+struct Camera
 {
 	Vector3 position;
 	// ориентация
@@ -183,14 +265,14 @@ struct Camera
 
 	// конструктор
 	Camera(const Vector3& pos, const Vector3& lookAt, const Vector3& upVec)
-		: position(pos) 
+		: position(pos)
 	{
-		forward = (lookAt - position).normalize(); 
+		forward = (lookAt - position).normalize();
 		right = forward.cross(upVec).normalize();
 		up = right.cross(forward);
 	}
 	// считаем направление луча из камеры для пикселя на изображении
-	Vector3 getRayDirection(float x, float y, float imageWidth, float imageHeight) const 
+	Vector3 getRayDirection(float x, float y, float imageWidth, float imageHeight) const
 	{
 		float fovScale = tan(M_PI / 4); // масштаб поля зрения
 		float aspectRatio = imageWidth / imageHeight; // соотношение сторон
@@ -227,7 +309,7 @@ struct Camera
 };
 
 // преломление
-Vector3 refract(const Vector3& I, const Vector3& N, float eta) 
+Vector3 refract(const Vector3& I, const Vector3& N, float eta)
 { // вектор падения, вектор нормали к поверхности, отношение преломлений сред -> вектор направления преломленного луча
 	float cosI = -I.dot(N); // косинус угла падения
 	float sinT2 = eta * eta * (1 - cosI * cosI);
@@ -239,7 +321,8 @@ Vector3 refract(const Vector3& I, const Vector3& N, float eta)
 // трассировка луча
 Vector3 traceRay(const Vector3& origin, const Vector3& direction,
 	const std::vector<Sphere>& spheres, const std::vector<Plane>& planes,
-	const std::vector<Cube>& cubes, const std::vector<Light>& lights, int depth)
+	const std::vector<Cube>& cubes, const std::vector<Light>& lights,
+	const std::vector<Triangle>& triangles, int depth)
 {
 	if (depth <= 0) return Vector3(0, 0, 0); // черный цвет при нулевой глубине
 
@@ -305,6 +388,21 @@ Vector3 traceRay(const Vector3& origin, const Vector3& direction,
 		}
 	}
 
+	// Треугольники из .obj
+	for (const auto& triangle : triangles)
+	{
+		float t;
+		if (triangle.intersect(origin, direction, t) && t < tMin)
+		{
+			tMin = t;
+			hitPoint = origin + direction * t;
+			normal = triangle.normal;
+			baseColor = triangle.color;
+			reflectivity = triangle.reflectivity;
+			transmissivity = triangle.transmissivity;
+			refractiveIndex = triangle.refractiveIndex;
+		}
+	}
 
 	if (tMin == std::numeric_limits<float>::infinity()) return Vector3(0, 0, 0); // ничего не пересечено
 
@@ -321,7 +419,7 @@ Vector3 traceRay(const Vector3& origin, const Vector3& direction,
 	if (reflectivity > 0)
 	{
 		Vector3 reflectDir = direction - normal * 2 * direction.dot(normal);
-		color = color + traceRay(hitPoint + normal * 1e-4, reflectDir, spheres, planes, cubes, lights, depth - 1) * reflectivity;
+		color = color + traceRay(hitPoint + normal * 1e-4, reflectDir, spheres, planes, cubes, lights, triangles, depth - 1) * reflectivity;
 	}
 
 	// Преломление
@@ -329,11 +427,12 @@ Vector3 traceRay(const Vector3& origin, const Vector3& direction,
 	{
 		float eta = direction.dot(normal) < 0 ? 1 / refractiveIndex : refractiveIndex;
 		Vector3 refractDir = refract(direction, normal, eta);
-		color = color + traceRay(hitPoint - normal * 1e-4, refractDir, spheres, planes, cubes, lights, depth - 1) * transmissivity;
+		color = color + traceRay(hitPoint - normal * 1e-4, refractDir, spheres, planes, cubes, lights, triangles, depth - 1) * transmissivity;
 	}
 
 	return color;
 }
+
 std::mutex sceneMutex;
 
 // Функция для добавления нового куба в сцену
@@ -367,9 +466,10 @@ void addLight(std::vector<Light>& lights, const Camera& camera)
 // Функция отрисовки строк изображения
 void renderRow(int startY, int endY, sf::Image& image, const Camera& camera,
 	const std::vector<Sphere>& spheres, const std::vector<Plane>& planes,
-	const std::vector<Cube>& cubes, const std::vector<Light>& lights, int traceDepth)
+	const std::vector<Cube>& cubes, const std::vector<Light>& lights,
+	const std::vector<Triangle>& triangles, int traceDepth)
 {
-	#pragma omp parallel for
+#pragma omp parallel for
 	for (int y = startY; y < endY; ++y)
 	{
 		for (int x = 0; x < WIDTH; ++x)
@@ -377,7 +477,7 @@ void renderRow(int startY, int endY, sf::Image& image, const Camera& camera,
 			// Получаем направление луча из камеры
 			Vector3 direction = camera.getRayDirection(x, y, WIDTH, HEIGHT);
 			// Трассируем луч
-			Vector3 color = traceRay(camera.position, direction, spheres, planes, cubes, lights, traceDepth);
+			Vector3 color = traceRay(camera.position, direction, spheres, planes, cubes, lights, triangles, traceDepth);
 
 			// Преобразуем цвет в формат для пикселя
 			sf::Color pixelColor(
@@ -391,12 +491,14 @@ void renderRow(int startY, int endY, sf::Image& image, const Camera& camera,
 	}
 }
 
+
 std::vector<std::thread> threadPool;
 
 void renderImageParallelOptimized(
 	sf::Image& image, const Camera& camera,
 	const std::vector<Sphere>& spheres, const std::vector<Plane>& planes,
 	const std::vector<Cube>& cubes, const std::vector<Light>& lights,
+	const std::vector<Triangle>& triangles, // Добавлено
 	int traceDepth, int WIDTH, int HEIGHT)
 {
 	// Создаем пул потоков
@@ -413,7 +515,7 @@ void renderImageParallelOptimized(
 
 		threadPool.push_back(std::thread(renderRow, startY, endY, std::ref(image),
 			std::cref(camera), std::cref(spheres), std::cref(planes),
-			std::cref(cubes), std::cref(lights), traceDepth));
+			std::cref(cubes), std::cref(lights), std::cref(triangles), traceDepth));
 	}
 
 	// Ожидаем завершения всех потоков
@@ -423,6 +525,7 @@ void renderImageParallelOptimized(
 			thread.join();
 	}
 }
+
 
 // основной рендеринг
 int main()
@@ -439,10 +542,48 @@ int main()
 	};
 	std::vector<Cube> cubes = {};
 	std::vector<Light> lights = {};
+	std::vector<Triangle> triangles; // Для треугольников из OBJ
+
+	// Загрузка OBJ-файла
+	//std::string inputfile = "cube.obj";
+	//std::string inputfile = "dodecahedron.obj";
+	tinyobj::attrib_t attrib;
+	std::vector<tinyobj::shape_t> shapes;
+	//std::vector<tinyobj::material_t> materials;
+	//std::string warn, err;
+
+	//if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, inputfile.c_str())) {
+	//	std::cerr << "Ошибка загрузки OBJ: " << warn << err << std::endl;
+	//	return 1;
+	//}
+
+	// Преобразование данных из OBJ в треугольники
+	for (const auto& shape : shapes) {
+		for (size_t i = 0; i < shape.mesh.indices.size(); i += 3) {
+			tinyobj::index_t idx0 = shape.mesh.indices[i];
+			tinyobj::index_t idx1 = shape.mesh.indices[i + 1];
+			tinyobj::index_t idx2 = shape.mesh.indices[i + 2];
+
+			Vector3 v0(attrib.vertices[3 * idx0.vertex_index],
+				attrib.vertices[3 * idx0.vertex_index + 1],
+				attrib.vertices[3 * idx0.vertex_index + 2]);
+			Vector3 v1(attrib.vertices[3 * idx1.vertex_index],
+				attrib.vertices[3 * idx1.vertex_index + 1],
+				attrib.vertices[3 * idx1.vertex_index + 2]);
+			Vector3 v2(attrib.vertices[3 * idx2.vertex_index],
+				attrib.vertices[3 * idx2.vertex_index + 1],
+				attrib.vertices[3 * idx2.vertex_index + 2]);
+
+			// Задаем треугольник с произвольным цветом и отражением
+			Vector3 color(0.6, 0.6, 0.6);
+			float reflection = 0.2f;
+			triangles.emplace_back(v0, v1, v2, color, reflection);
+		}
+	}
 
 	Camera camera(Vector3(0, 2, -0.5), Vector3(-1, 2, -0.5), Vector3(0, 1, 0));
 
-	renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, traceDepth, WIDTH, HEIGHT);
+	renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT);
 
 	sf::Texture texture;
 	texture.loadFromImage(image);
@@ -455,94 +596,77 @@ int main()
 	sf::Clock clock;
 	int turn = 0, RTturn = 0;
 
-	while (window.isOpen())
-	{
+	while (window.isOpen()) {
 		sf::Event event;
-		while (window.pollEvent(event))
-		{
-			if (event.type == sf::Event::Closed)
-			{
+		while (window.pollEvent(event)) {
+			if (event.type == sf::Event::Closed) {
 				window.close();
 			}
-			if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::C)
-			{
+			if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::C) {
 				if (turn % 2 == 0)
 					addCube(cubes, camera); // Добавляем куб
 				else
 					addSphere(spheres, camera); // Добавляем сферу
 				turn++;
 
-				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, traceDepth, WIDTH, HEIGHT);
+				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT);
 
 				texture.loadFromImage(image);
 			}
 
-			if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::R)
-			{
+			if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::R) {
 				RTturn++;
 
 				traceDepth = (RTturn % 2 == 0) ? 1 : 4;
 
-				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, traceDepth, WIDTH, HEIGHT);
+				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT);
 
 				texture.loadFromImage(image);
 			}
 
-			if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::L)
-			{
+			if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::L) {
 				addLight(lights, camera); // Добавляем источник света
 
-				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, traceDepth, WIDTH, HEIGHT);
+				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT);
 
 				texture.loadFromImage(image);
 			}
 
-			if (event.type == sf::Event::MouseMoved)
-			{
-				// Обновляем направление камеры в зависимости от координат курсора
+			if (event.type == sf::Event::MouseMoved) {
 				camera.lookAtCursor(event.mouseMove.x, event.mouseMove.y, WIDTH, HEIGHT);
 
-				// Перерисовываем сцену после обновления камеры
-				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, traceDepth, WIDTH, HEIGHT);
+				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT);
 
 				texture.loadFromImage(image);
 				sprite.setTexture(texture);
 
 				window.clear();
 				window.draw(sprite);
-				window.draw(fpsBar); // Отображаем полоску FPS
+				window.draw(fpsBar);
 				window.display();
 			}
 		}
 
-		// Скорость движения камеры
 		float cameraSpeed = 0.5f;
-		if (sf::Keyboard::isKeyPressed(sf::Keyboard::W))
-		{
+		if (sf::Keyboard::isKeyPressed(sf::Keyboard::W)) {
 			camera.position = camera.position + camera.forward * cameraSpeed;
 		}
-		if (sf::Keyboard::isKeyPressed(sf::Keyboard::S))
-		{
+		if (sf::Keyboard::isKeyPressed(sf::Keyboard::S)) {
 			camera.position = camera.position - camera.forward * cameraSpeed;
 		}
-		if (sf::Keyboard::isKeyPressed(sf::Keyboard::A))
-		{
+		if (sf::Keyboard::isKeyPressed(sf::Keyboard::A)) {
 			camera.position = camera.position - camera.right * cameraSpeed;
 		}
-		if (sf::Keyboard::isKeyPressed(sf::Keyboard::D))
-		{
+		if (sf::Keyboard::isKeyPressed(sf::Keyboard::D)) {
 			camera.position = camera.position + camera.right * cameraSpeed;
 		}
 
-		// Обновление FPS
 		float elapsedTime = clock.restart().asSeconds();
 		float fps = 1.f / elapsedTime;
 
-		// Обновляем ширину полоски FPS
-		float normalizedFps = std::min(fps / 60.f, 1.f); // Нормализуем FPS до [0, 1]
+		float normalizedFps = std::min(fps / 60.f, 1.f);
 		fpsBar.setSize(sf::Vector2f(200.f * normalizedFps, 20.f));
 
-		// Изменяем цвет полоски в зависимости от FPS
 		if (fps >= 50)
 			fpsBar.setFillColor(sf::Color::Green);
 		else if (fps >= 20)
@@ -550,14 +674,13 @@ int main()
 		else
 			fpsBar.setFillColor(sf::Color::Red);
 
-		// Перерисовываем сцену
-		renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, traceDepth, WIDTH, HEIGHT);
+		renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT);
 		texture.loadFromImage(image);
 		sprite.setTexture(texture);
 
 		window.clear();
 		window.draw(sprite);
-		window.draw(fpsBar); // Рисуем полоску FPS
+		window.draw(fpsBar);
 		window.display();
 	}
 
