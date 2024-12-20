@@ -247,10 +247,17 @@ struct Cube
 // Источник света
 struct Light
 {
-	Vector3 position;
-	Vector3 intensity;
+	Vector3 position;   // Позиция источника света
+	Vector3 intensity;  // Интенсивность света (например, цвет и яркость)
+	Vector3 direction;  // Направление света (для направленного света или прожектора)
 
-	Light(const Vector3& pos, const Vector3& inten) : position(pos), intensity(inten) {}
+	// Конструктор для точечного света (с позицией)
+	Light(const Vector3& pos, const Vector3& inten)
+		: position(pos), intensity(inten), direction(Vector3(0, 0, 0)) {}
+
+	// Конструктор для направленного света (с направлением)
+	Light(const Vector3& pos, const Vector3& inten, const Vector3& dir)
+		: position(pos), intensity(inten), direction(dir) {}
 };
 
 // камера
@@ -542,7 +549,10 @@ int main()
 		Plane(Vector3(0, -2, 0), Vector3(0, 1, 0), Vector3(0.8, 0.8, 0.8), 0.3),
 	};
 	std::vector<Cube> cubes = {};
-	std::vector<Light> lights = {};
+	std::vector<Light> lights = {
+		// Добавляем прожектор с конкретной позицией и направлением
+		Light(Vector3(10, 10, -10), Vector3(0.8, 0.8, 0.8), Vector3(1, 0, 0)) 
+	};
 	std::vector<Triangle> triangles; // Для треугольников из OBJ
 
 	// Загрузка OBJ-файла
