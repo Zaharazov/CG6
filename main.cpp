@@ -14,7 +14,6 @@
 
 const int WIDTH = 600;
 const int HEIGHT = 500;
-
 // вектор для 3D операций
 struct Vector3
 {
@@ -467,12 +466,12 @@ void addLight(std::vector<Light>& lights, const Camera& camera)
 void renderRow(int startY, int endY, sf::Image& image, const Camera& camera,
 	const std::vector<Sphere>& spheres, const std::vector<Plane>& planes,
 	const std::vector<Cube>& cubes, const std::vector<Light>& lights,
-	const std::vector<Triangle>& triangles, int traceDepth)
+	const std::vector<Triangle>& triangles, int traceDepth, int quality)
 {
 #pragma omp parallel for
-	for (int y = startY; y < endY; y += 1)
+	for (int y = startY; y < endY; y += quality)
 	{
-		for (int x = 0; x < WIDTH; x += 1)
+		for (int x = 0; x < WIDTH; x += quality)
 		{
 			// Получаем направление луча из камеры
 			Vector3 direction = camera.getRayDirection(x, y, WIDTH, HEIGHT);
@@ -499,7 +498,7 @@ void renderImageParallelOptimized(
 	const std::vector<Sphere>& spheres, const std::vector<Plane>& planes,
 	const std::vector<Cube>& cubes, const std::vector<Light>& lights,
 	const std::vector<Triangle>& triangles, // Добавлено
-	int traceDepth, int WIDTH, int HEIGHT)
+	int traceDepth, int WIDTH, int HEIGHT, int quality)
 {
 	// Создаем пул потоков
 	int numThreads = std::thread::hardware_concurrency();
@@ -515,7 +514,7 @@ void renderImageParallelOptimized(
 
 		threadPool.push_back(std::thread(renderRow, startY, endY, std::ref(image),
 			std::cref(camera), std::cref(spheres), std::cref(planes),
-			std::cref(cubes), std::cref(lights), std::cref(triangles), traceDepth));
+			std::cref(cubes), std::cref(lights), std::cref(triangles), traceDepth, quality));
 	}
 
 	// Ожидаем завершения всех потоков
@@ -532,6 +531,7 @@ int main()
 {
 	omp_set_num_threads(36);
 	int traceDepth = 1;
+	int quality = 1;
 
 	sf::RenderWindow window(sf::VideoMode(WIDTH, HEIGHT), "Optimized Scene Rendering");
 	sf::Image image;
@@ -586,7 +586,7 @@ int main()
 
 	Camera camera(Vector3(0, 2, -0.5), Vector3(-1, 2, -0.5), Vector3(0, 1, 0));
 
-	renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT);
+	renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT, quality);
 
 	sf::Texture texture;
 	texture.loadFromImage(image);
@@ -597,7 +597,7 @@ int main()
 	fpsBar.setPosition(10.f, 10.f);
 
 	sf::Clock clock;
-	int RTturn = 0;
+	int RTturn = 0, Qturn = 0;
 
 	while (window.isOpen()) {
 		sf::Event event;
@@ -608,17 +608,29 @@ int main()
 			if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::Num1) {
 				addCube(cubes, camera); // Добавляем куб
 
-				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT);
+				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT, quality);
 
 				texture.loadFromImage(image);
+				sprite.setTexture(texture);
+
+				window.clear();
+				window.draw(sprite);
+				window.draw(fpsBar);
+				window.display();
 			}
 
 			if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::Num2) {
 				addSphere(spheres, camera); // Добавляем сферу
 
-				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT);
+				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT, quality);
 
 				texture.loadFromImage(image);
+				sprite.setTexture(texture);
+
+				window.clear();
+				window.draw(sprite);
+				window.draw(fpsBar);
+				window.display();
 			}
 
 			if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::R) {
@@ -626,23 +638,53 @@ int main()
 
 				traceDepth = (RTturn % 2 == 0) ? 1 : 4;
 
-				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT);
+				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT, quality);
 
 				texture.loadFromImage(image);
+				sprite.setTexture(texture);
+
+				window.clear();
+				window.draw(sprite);
+				window.draw(fpsBar);
+				window.display();
 			}
 
 			if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::L) {
 				addLight(lights, camera); // Добавляем источник света
 
-				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT);
+				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT, quality);
 
 				texture.loadFromImage(image);
+				sprite.setTexture(texture);
+
+				window.clear();
+				window.draw(sprite);
+				window.draw(fpsBar);
+				window.display();
+			}
+
+			if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::Q) {
+				Qturn++;
+
+				quality = (Qturn % 2 == 0) ? 1 : 2;
+
+				image.create(WIDTH, HEIGHT, sf::Color(0, 0, 0));
+
+				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT, quality);
+
+				texture.loadFromImage(image);
+				sprite.setTexture(texture);
+
+				window.clear();
+				window.draw(sprite);
+				window.draw(fpsBar);
+				window.display();
 			}
 
 			if (event.type == sf::Event::MouseMoved) {
 				camera.lookAtCursor(event.mouseMove.x, event.mouseMove.y, WIDTH, HEIGHT);
 
-				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT);
+				renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT, quality);
 
 				texture.loadFromImage(image);
 				sprite.setTexture(texture);
@@ -681,7 +723,7 @@ int main()
 		else
 			fpsBar.setFillColor(sf::Color::Red);
 
-		renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT);
+		renderImageParallelOptimized(image, camera, spheres, planes, cubes, lights, triangles, traceDepth, WIDTH, HEIGHT, quality);
 		texture.loadFromImage(image);
 		sprite.setTexture(texture);
 
