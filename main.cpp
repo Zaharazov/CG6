@@ -298,28 +298,29 @@ struct Camera
 {
 	Vector3 position;   // Позиция камеры в 3D-пространстве
 	Vector3 forward;    // Направление, в котором смотрит камера (вектор вперед)
-	Vector3 up;         // Направление вверх для камеры (перпендикулярно направлению вперед)
-	Vector3 right;      // Направление вправо для камеры (перпендикулярно forward и up)
+	Vector3 up;         // Направление вверх для камеры
+	Vector3 right;      // Направление вправо для камеры
+	float fov;          // Угол поля зрения в градусах
 
 	// Конструктор камеры, инициализирует положение и направления
-	Camera(const Vector3& pos, const Vector3& lookAt, const Vector3& upVec)
-		: position(pos)
+	Camera(const Vector3& pos, const Vector3& lookAt, const Vector3& upVec, float fieldOfView = 45.0f)
+		: position(pos), fov(fieldOfView)
 	{
-		forward = (lookAt - position).normalize();  // Направление от камеры к цели (normalized)
-		right = forward.cross(upVec).normalize();  // Вектор вправо, пересекающий направление вперед и up
-		up = right.cross(forward);  // Направление вверх, пересекающее right и forward
+		forward = (lookAt - position).normalize();  // Направление от камеры к цели
+		right = forward.cross(upVec).normalize();  // Вектор вправо, перпендикулярен forward и up
+		up = right.cross(forward).normalize();     // Направление вверх
 	}
 
 	// Метод для получения направления луча из камеры на пиксель на изображении
 	Vector3 getRayDirection(float x, float y, float imageWidth, float imageHeight) const
 	{
-		// Масштаб поля зрения (поля зрения камеры)
-		float fovScale = tan(M_PI / 4);  // В данном случае угол поля зрения 45°
-		float aspectRatio = imageWidth / imageHeight;  // Соотношение сторон изображения
+		// Масштаб поля зрения (поле зрения камеры)
+		float fovScale = tan(fov * M_PI / 180.0f / 2.0f); // Преобразуем FOV в радианы и делим на 2
+		float aspectRatio = imageWidth / imageHeight;     // Соотношение сторон изображения
 
 		// Преобразуем пиксельные координаты в пространственные
-		float px = (2 * (x + 0.5) / imageWidth - 1) * aspectRatio * fovScale;
-		float py = (1 - 2 * (y + 0.5) / imageHeight) * fovScale;
+		float px = (x - imageWidth / 2) / (imageWidth / 2) * aspectRatio * fovScale;
+		float py = -(y - imageHeight / 2) / (imageHeight / 2) * fovScale;
 
 		// Направление луча из камеры в точку на изображении
 		return (forward + right * px + up * py).normalize();
@@ -336,12 +337,11 @@ struct Camera
 
 		// Плавно изменяем направление камеры, чтобы она смотрела в сторону курсора
 		forward = forward * (1 - smoothingFactor) + direction * smoothingFactor;
-
-		// Нормализуем новое направление
 		forward = forward.normalize();
 
-		// Сохраняем вертикальное направление (up) неизменным
-		right = forward.cross(up).normalize();  // Переопределяем направление right
+		// Обновляем направления "вправо" и "вверх", чтобы они оставались ортогональными
+		right = forward.cross(up).normalize();
+		//up = right.cross(forward).normalize();
 	}
 };
 
@@ -622,8 +622,7 @@ int main()
 	std::vector<Triangle> triangles; // Для треугольников из OBJ
 
 	// Загрузка данных из OBJ файла (для треугольников)
-	// Раскомментировать, если хотите загрузить 3D-модель из файла
-	//std::string inputfile = "cube.obj";
+	std::string inputfile = "cube.obj";
 	//std::string inputfile = "dodecahedron.obj";
 
 	tinyobj::attrib_t attrib;
@@ -632,10 +631,10 @@ int main()
 	std::string warn, err;
 
 	// Загрузка OBJ файла
-	//if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, inputfile.c_str())) {
-	//    std::cerr << "Ошибка загрузки OBJ: " << warn << err << std::endl;
-	//    return 1;
-	//}
+	if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, inputfile.c_str())) {
+		std::cerr << "Ошибка загрузки OBJ: " << warn << err << std::endl;
+		return 1;
+	}
 
 	// Преобразование данных из OBJ в треугольники
 	// Проходим по каждой форме в файле OBJ и создаем треугольники
